@@ -48,7 +48,7 @@ def handle_client(con, cliente):
             # Tratamento do comando DOW para download de arquivos
             elif comando.upper().startswith("DOW "):
                 nome_arquivo = comando[4:].strip()  # Extrai o nome do arquivo após 'DOW '
-                caminho = os.path.join("arquivos", nome_arquivo)  # Define o caminho para a pasta 'arquivos'
+                caminho = os.path.join(PASTA_ARQUIVOS, nome_arquivo)  # Define o caminho para a pasta 'arquivos'
 
                 # Verifica se o arquivo existe e é um arquivo regular
                 if os.path.isfile(caminho):
