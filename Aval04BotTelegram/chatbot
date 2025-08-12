@@ -4,6 +4,7 @@ TOKEN = "8381835325:AAEP9d-faE3AQX0XaVnM63ccyksiDOJx-s0"
 HOST  = "api.telegram.org"
 PORT  = 443
 
+# criar e retornar um socket TLS conectado ao HOST
 def conn_to():
     sock_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock_tcp.connect((HOST, PORT))
@@ -11,9 +12,11 @@ def conn_to():
     context = ssl.create_default_context(purpose)
     return context.wrap_socket(sock_tcp, server_hostname=HOST)
 
+# enviar um POST para sendMessage do Telegram
 def send_post(chat_id, text):
     sock_tcp = conn_to()
-    response = json.dumps({"chat_id": chat_id, "text": text})  # agora usa JSON válido
+    # cria o corpo JSON (payload) com chat_id e texto
+    response = json.dumps({"chat_id": chat_id, "text": text})
     resource = "/bot"+TOKEN+"/sendMessage"
     sock_tcp.send((
         "POST "+resource+" HTTP/1.1\r\n"+
@@ -26,6 +29,7 @@ def send_post(chat_id, text):
     get_response(sock_tcp)
     sock_tcp.close()
 
+# enviar um GET para um endpoint da API
 def send_get(sock_tcp, cmd):
     resource = "/bot"+TOKEN+"/"+cmd
     sock_tcp.send(("GET "+resource+" HTTP/1.1\r\n"+
@@ -39,6 +43,7 @@ def get_response(sock_tcp):
         return (None, None, None)
     headers, body = header_body[0].decode().split("\r\n"), header_body[1]
     status_line = headers[0]
+    # verifica se o status é 200 (OK)
     if status_line.split()[1] == "200":
         to_read = 0
         for header in headers[1:]:
@@ -54,6 +59,7 @@ def get_response(sock_tcp):
         return (status_line, headers[1:], json.loads(body.decode()))    
     return (None, None, None)
 
+# função para obter updates do Telegram (usa getUpdates da API)
 def get_updates(offset=0):
     sock_tcp = conn_to()
     send_get(sock_tcp, f"getUpdates?offset={offset}")
@@ -61,6 +67,7 @@ def get_updates(offset=0):
     sock_tcp.close()
     return body["result"]
 
+# envia o menu de opções ao usuário
 def enviar_menu(chat_id):
     menu = (
         "Olá, escolha de 1 à 6 de acordo com as opções abaixo que você desejar:\n"
@@ -71,8 +78,9 @@ def enviar_menu(chat_id):
         "5 - Route table\n"
         "6 - Sair"
     )
-    send_post(chat_id, menu)
+    send_post(chat_id, menu) # chama send_post para enviar o menu
 
+# processa a opção numérica escolhida pelo usuário
 def processar_opcao(chat_id, opcao):
     if opcao == "1":
         result = subprocess.getoutput("ping www.uol.com.br")
@@ -97,11 +105,12 @@ def processar_opcao(chat_id, opcao):
     
     send_post(chat_id, result)
 
+# principal que mantém o bot em polling
 def main():
     print("Aceitando updates ....")
     last_update = 0
-    while True:
-        updates = get_updates(last_update + 1)
+    while True: # loop infinito para manter o bot rodando
+        updates = get_updates(last_update + 1) #busca updates passando offset (last_update + 1 evita receber novamente os antigos)
         for update in updates:
             chat_id = update["message"]["chat"]["id"]
             text = update["message"].get("text", "").strip()
@@ -111,14 +120,14 @@ def main():
 
             # Decisão de resposta
             if text.lower().startswith("/start") or text.lower() == "menu":
-                enviar_menu(chat_id)
+                enviar_menu(chat_id) # envia menu
             elif text.isdigit():
                 processar_opcao(chat_id, text)
             else:
-                send_post(chat_id, "Digite /start para ver o menu.")
+                send_post(chat_id, "Digite /start para ver o menu.") # caso não seja comando reconhecido, pede para usar /start
 
             last_update = update["update_id"]
         print("-------------")
-        time.sleep(2)
+        time.sleep(2) # pausa 2 segundos antes de nova requisição para reduzir taxa de requests
 
 main()
