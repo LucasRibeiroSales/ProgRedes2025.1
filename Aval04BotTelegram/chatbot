@@ -55,7 +55,7 @@ def get_response(sock_tcp):
     return (None, None, None)
 
 def get_updates(offset=0):
-    sock_tcp = conn_to()  # cria conexão nova toda vez
+    sock_tcp = conn_to()
     send_get(sock_tcp, f"getUpdates?offset={offset}")
     status_line, headers, body = get_response(sock_tcp)    
     sock_tcp.close()
@@ -63,33 +63,33 @@ def get_updates(offset=0):
 
 def enviar_menu(chat_id):
     menu = (
-        "Olá, tudo bem? Escolha de 1 à 5 de acordo com as opções abaixo que você desejar:\n"
+        "Olá, escolha de 1 à 6 de acordo com as opções abaixo que você desejar:\n"
         "1 - Ping\n"
         "2 - Traceroute\n"
         "3 - Ipconfig\n"
-        "4 - Arp -a\n"
-        "5 - Netstat\n"
+        "4 - Dir\n"
+        "5 - Route table\n"
         "6 - Sair"
     )
     send_post(chat_id, menu)
 
 def processar_opcao(chat_id, opcao):
     if opcao == "1":
-        result = subprocess.getoutput("ping 8.8.8.8")
+        result = subprocess.getoutput("ping www.uol.com.br")
     elif opcao == "2":
         result = subprocess.getoutput("tracert -h 5 8.8.8.8")
     elif opcao == "3":
         if platform.system().lower().startswith("win"):
             result = subprocess.getoutput("ipconfig")
         else:
-            result = subprocess.getoutput("ifconfig")
+            result = subprocess.getoutput("ipconfig")
     elif opcao == "4":
-        result = subprocess.getoutput("arp -a")
-    elif opcao == "5":
         if platform.system().lower().startswith("win"):
-            result = subprocess.getoutput("netstat -an")
+            result = subprocess.getoutput("dir")
         else:
-            result = subprocess.getoutput("netstat -tunlp")
+            result = subprocess.getoutput("dir")
+    elif opcao == "5":
+        result = subprocess.getoutput("route table")
     elif opcao == "6":
         result = "Até mais! Encerrando o chat."
     else:
