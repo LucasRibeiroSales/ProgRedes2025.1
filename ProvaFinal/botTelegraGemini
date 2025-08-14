@@ -1,0 +1,183 @@
+import socket, ssl, json, time
+import requests
+
+GEMINI_TOKEN  = "AIzaSyDRgWQE7-hfCv4ro56q2uGAyphABSygzzk"
+TELEGRAM_TOKEN = "8381835325:AAEP9d-faE3AQX0XaVnM63ccyksiDOJx-s0"
+
+# CÓDIGO DO GEMINI
+SERVICES = { "gemini" : { "model"    : "gemini-2.5-flash", 
+                          "host"     : "generativelanguage.googleapis.com",
+                          "endpoint" : "/v1beta/openai/chat/completions",
+                          "token"    : GEMINI_TOKEN  }
+   }
+
+headers = {
+    "Authorization": "",
+    "Content-Type": "application/json"
+   }
+
+payload =  {   "model" : "", 
+               "messages"   : [ 
+                  {"role": "system", "content": "Você é um assistente."},
+                  {"role": "user", "content": ""} ],
+               "temperature": 0.7,
+               "max_tokens" : 10000
+   }
+
+def set_model (service):
+   payload ["model"] = SERVICES[service]["model"]
+   headers ["Authorization"] = f'Bearer {SERVICES[service]["token"]}'
+   
+def set_prompt (prompt):
+   payload["messages"][1]["content"] = prompt
+    
+def extrair_resultado (data):
+   try: 
+      response = data["choices"][0]["message"]["content"].strip()
+   except Exception as e:
+      print ("Erro na resposta do modelo ", e)
+      response = ""
+   
+   return response
+         
+def perguntar(service, strPrompt: str) -> str:
+   try:
+      set_prompt (strPrompt)
+      reqEnvio = requests.post("https://"+ 
+                               SERVICES[service]["host"]+
+                               SERVICES[service]["endpoint"], 
+                               headers=headers, json=payload)
+      reqEnvio.raise_for_status()
+      data = reqEnvio.json()
+      return extrair_resultado(data)
+   except Exception as e:
+      return f"\nERRO: {e}..."
+# Excluído a parte de escolher o menu IA
+'''
+def select_service():
+   for id, service in enumerate(SERVICES):
+      print (f"{id+1} - {service}")
+
+   try:
+      service = SERVICES.items()[int(input("Selecione um serviço: "))-1][1]
+   except:
+      service = 'gemini'
+   
+   return service
+'''
+
+# BOT TELEGRAM
+HOST  = "api.telegram.org"
+PORT  = 443
+
+def conn_to(host, port):
+    sock_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock_tcp.connect((host, port))
+    purpose = ssl.Purpose.SERVER_AUTH
+    context = ssl.create_default_context(purpose)
+    return context.wrap_socket(sock_tcp, server_hostname=HOST)
+
+def send_get (sock_tcp, resource, headers):
+    sock_tcp.send (("GET "+resource+" HTTP/1.1\r\n"+
+                    headers+
+                    "\r\n").encode("utf-8"))
+        
+def send_post (sock_tcp, resource, headers, body): 
+    body = body.encode("utf-8")
+    sock_tcp.send (("POST "+resource+" HTTP/1.1\r\n"+
+                   "Content-Length: "+str(len(body))+"\r\n"+headers+
+                   "\r\n").encode("utf-8"))
+    sock_tcp.send(body)
+    
+def get_response(sock_tcp):
+    answer = sock_tcp.recv(4096)
+    header_body = answer.split(b"\r\n\r\n")
+    headers, body = header_body[0].decode().split("\r\n"), header_body[1]
+
+    status_line = headers[0]
+    if status_line.split()[1] == "200":
+        for header in headers[1:]:
+            field_value = header.split(":")
+            if field_value[0] == "Content-Length":
+                to_read = int (field_value[1])
+                break
+    
+        to_read -= len(body)
+        while to_read > 0:
+            segment = sock_tcp.recv(4096)
+            body += segment
+            to_read -= len(segment)
+    
+        return (status_line, headers[1:], json.loads(body.decode()))    
+    return (None, None, None)
+
+# Alteração do código updates 
+def get_updates(sock_tcp, offset = 0):
+    cmd = f"getUpdates?offset={offset}"
+    resource = "/bot"+TELEGRAM_TOKEN+"/"+cmd # Removido o mytokens
+    headers = "Host: "+HOST+"\r\n"
+    send_get(sock_tcp, resource, headers)
+    status_line, headers, body = get_response(sock_tcp)    
+    return body["result"]
+# NOVO conexão entre o telegram e gemini
+def send_gemini_answer(sock_tcp, update, gemini_answer):
+    chat_id  = update["message"]["chat"]["id"]
+    body_payload = {
+        "chat_id": chat_id,
+        "text": gemini_answer # resposta de texto do gemini
+    }
+    body = json.dumps(body_payload) # Converte o dicionário em um string no formato JSON
+
+    cmd = "/sendMessage" # enviar uma mensagem
+    resource = "/bot"+TELEGRAM_TOKEN+cmd #requisição com o token
+    headers = ("Content-Type: application/json\r\n"+
+               "Host: "+HOST+"\r\n")
+    send_post(sock_tcp, resource, headers, body) # Envia a mensagem
+    get_response(sock_tcp) # resposta do server
+    return update["update_id"] # retorna para o update id
+
+# Código removido do input
+'''
+def show_update(update):
+    print (update["message"]["chat"]["first_name"], "->", update["message"]["text"])
+    
+def answer_update(update):
+    sock_tcp = conn_to(HOST, PORT)
+    chat_id  = update["message"]["chat"]["id"]
+    
+    answer = input ("Sua resposta: ")
+    answer = 
+    body = '{"chat_id":'+str(chat_id)+', "text":"'+answer+'"}'
+    
+    cmd = "/sendMessage"
+    resource = "/bot"+mytokens.TELEGRAM_TOKEN+cmd
+    headers = ("Content-Type: application/json\r\n"+
+               "Host: "+HOST+"\r\n")
+    send_post(sock_tcp, resource, headers, body)
+    get_response(sock_tcp)
+    sock_tcp.close()
+    return update["update_id"]
+'''
+def main():
+    sock_tcp = conn_to(HOST, PORT)
+    print ("Aceitando updates ....")
+    set_model("gemini") # Adcionado o gemini
+    last_update = 0
+    while True:
+        updates = get_updates(sock_tcp, last_update+1) # Capturando mensagens do usuário
+        for update in updates:
+            # Captura a mensagem do usuário
+            user_message = update["message"]["text"]
+            user_name = update["message"]["chat"]["first_name"]
+            print (f"{user_name} -> {user_message}") # Exibição do usuário e mensagem
+            gemini_answer = perguntar("gemini", user_message) # Chama o Gemini com a mensagem do usuário e recebe a resposta
+            print(f"Gemini -> {gemini_answer}") # Exibir mensagem do gemini ao usuário no telegram
+            last_update = send_gemini_answer(sock_tcp, update, gemini_answer) # Envia a resposta do Gemini para o Telegram
+        
+        print ("-------------")
+        time.sleep(2)
+    
+    sock_tcp.close()
+    
+if __name__ == "__main__":
+    main()
