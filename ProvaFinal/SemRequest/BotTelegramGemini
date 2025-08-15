@@ -1,0 +1,225 @@
+import socket, ssl, json, time
+
+GEMINI_TOKEN = "AIzaSyDRgWQE7-hfCv4ro56q2uGAyphABSygzzk"
+TELEGRAM_TOKEN = "8381835325:AAEP9d-faE3AQX0XaVnM63ccyksiDOJx-s0"
+
+# CÓDIGO DO GEMINI
+SERVICES = {
+    "gemini" : { 
+        "model" : "gemini-2.5-flash",
+        "host": "generativelanguage.googleapis.com",
+        "endpoint" : "/v1beta/models/gemini-pro:generateContent",
+        "token": GEMINI_TOKEN 
+    },
+    }
+
+headers = {
+    "Authorization": "",
+    "Content-Type": "application/json"
+}
+
+payload = {
+    "model" : "", 
+    "messages" : [ 
+        {"role": "system", "content": "Você é um assistente."},
+        {"role": "user", "content": ""} 
+    ],
+    "temperature": 0.7,
+    "max_tokens" : 10000
+}
+
+def conn_to(host, port):
+    sock_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock_tcp.connect((host, port))
+    purpose = ssl.Purpose.SERVER_AUTH
+    context = ssl.create_default_context(purpose)
+    return context.wrap_socket(sock_tcp, server_hostname=host)
+
+def send_post(sock_tcp, resource, headers, body):
+    body = body.encode("utf-8")
+    request_line = f"POST {resource} HTTP/1.1\r\n"
+    header_string = ""
+    for key, value in headers.items():
+        header_string += f"{key}: {value}\r\n"
+    sock_tcp.send(
+        (request_line + f"Content-Length: {len(body)}\r\n" + header_string + "\r\n").encode("utf-8")
+    )
+    sock_tcp.send(body)
+
+def get_response(sock_tcp):
+    answer = sock_tcp.recv(4096)
+    header_body = answer.split(b"\r\n\r\n")
+    headers, body = header_body[0].decode().split("\r\n"), header_body[1]
+    status_line = headers[0]
+    to_read = 0
+    if status_line.split()[1] == "200":
+        for header in headers[1:]:
+            field_value = header.split(":")
+            if field_value[0] == "Content-Length":
+                to_read = int(field_value[1])
+                break
+    to_read -= len(body)
+    while to_read > 0:
+        segment = sock_tcp.recv(4096)
+        body += segment
+        to_read -= len(segment)
+    if status_line.split()[1] == "200":
+        try:
+            return (status_line, headers[1:], json.loads(body.decode()))
+        except json.JSONDecodeError:
+            return (status_line, headers[1:], {"error": "Invalid JSON response"})
+    return (None, None, None)
+
+def set_model(service):
+    payload["model"] = SERVICES[service]["model"]
+    if service != "gemini":
+        headers["Authorization"] = f'Bearer {SERVICES[service]["token"]}'
+
+def set_prompt(prompt):
+    payload["messages"][1]["content"] = prompt
+    
+def extrair_resultado(data):
+    try: 
+        response = data["choices"][0]["message"]["content"].strip()
+    except KeyError as e:
+        print(f"Erro na resposta do modelo: Chave ausente - {e}")
+        print("Resposta completa da API:")
+        print(json.dumps(data, indent=2))
+        response = "Erro: Resposta inesperada da API."
+    except Exception as e:
+        print ("Erro na resposta do modelo ", e)
+        response = ""
+    
+    return response
+
+def perguntar(service, strPrompt: str) -> str:
+    try:
+        sock_tcp = conn_to(SERVICES[service]["host"], 443)
+        set_prompt(strPrompt)
+
+        # Monta os headers da requisição
+        headers = {
+            "Content-Type": "application/json",
+            "Host": SERVICES[service]["host"],
+        }
+
+        if service != "gemini":
+            headers["Authorization"] = f'Bearer {SERVICES[service]["token"]}'
+        
+        # Constrói a URL com a chave de API para o Gemini
+        resource = SERVICES[service]["endpoint"]
+        if service == "gemini":
+            resource += f"?key={SERVICES[service]['token']}"
+
+        body_bytes = json.dumps(payload).encode("utf-8")
+        send_post(sock_tcp, resource, headers, body_bytes.decode())
+        
+        # Recebe e processa a resposta
+        status_line, response_headers, data = get_response(sock_tcp)
+        sock_tcp.close()
+
+        if status_line and status_line.startswith("HTTP/1.1 200 OK"):
+            return extrair_resultado(data)
+        else:
+            print(f"ERRO: Resposta do servidor não foi 200 OK: {status_line}")
+            if data:
+                print(f"Detalhes do erro: {json.dumps(data, indent=2)}")
+            return "\nERRO de API: Resposta do servidor não foi 200 OK."
+
+    except Exception as e:
+        return f"\nERRO: {e}..."
+
+
+# BOT TELEGRAM
+
+HOST = "api.telegram.org"
+PORT = 443
+
+def conn_to(host, port):
+    sock_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock_tcp.connect((host, port))
+    purpose = ssl.Purpose.SERVER_AUTH
+    context = ssl.create_default_context(purpose)
+    return context.wrap_socket(sock_tcp, server_hostname=host)
+
+def send_post(sock_tcp, resource, headers, body):
+    body = body.encode("utf-8")
+    request_line = f"POST {resource} HTTP/1.1\r\n"
+    header_string = ""
+    for key, value in headers.items():
+        header_string += f"{key}: {value}\r\n"
+    sock_tcp.send(
+        (request_line + f"Content-Length: {len(body)}\r\n" + header_string + "\r\n").encode("utf-8")
+    )
+    sock_tcp.send(body)
+
+def send_get(sock_tcp, resource, headers):
+    sock_tcp.send(
+        ("GET " + resource + " HTTP/1.1\r\n" + headers + "\r\n").encode("utf-8")
+    )
+
+def get_response(sock_tcp):
+    answer = sock_tcp.recv(4096)
+    header_body = answer.split(b"\r\n\r\n")
+    headers, body = header_body[0].decode().split("\r\n"), header_body[1]
+    status_line = headers[0]
+    to_read = 0
+    if status_line.split()[1] == "200":
+        for header in headers[1:]:
+            field_value = header.split(":")
+            if field_value[0] == "Content-Length":
+                to_read = int(field_value[1])
+                break
+    to_read -= len(body)
+    while to_read > 0:
+        segment = sock_tcp.recv(4096)
+        body += segment
+        to_read -= len(segment)
+    if status_line.split()[1] == "200":
+        try:
+            return (status_line, headers[1:], json.loads(body.decode()))
+        except json.JSONDecodeError:
+            return (status_line, headers[1:], {"error": "Invalid JSON response"})
+    return (None, None, None)
+
+def get_updates(sock_tcp, offset=0):
+    cmd = f"getUpdates?offset={offset}&timeout=30" 
+    resource = "/bot" + TELEGRAM_TOKEN + "/" + cmd
+    headers = "Host: " + HOST + "\r\n"
+    send_get(sock_tcp, resource, headers)
+    status_line, headers, body = get_response(sock_tcp)
+    return body["result"]
+
+def send_gemini_answer(sock_tcp, update, gemini_answer):
+    chat_id = update["message"]["chat"]["id"]
+    body_payload = {"chat_id": chat_id, "text": gemini_answer}
+    body = json.dumps(body_payload)
+    cmd = "/sendMessage"
+    resource = "/bot" + TELEGRAM_TOKEN + cmd
+    headers_dict = {"Content-Type": "application/json", "Host": HOST}
+    send_post(sock_tcp, resource, headers_dict, body)
+    get_response(sock_tcp)
+    return update["update_id"]
+
+def main():
+    sock_tcp = conn_to(HOST, PORT)
+    print("Aceitando updates ....")
+    last_update = 0
+    while True:
+        updates = get_updates(sock_tcp, last_update + 1)
+        if updates:
+            for update in updates:
+                if "message" in update and "text" in update["message"]:
+                    user_message = update["message"]["text"]
+                    user_name = update["message"]["chat"]["first_name"]
+                    print(f"{user_name} -> {user_message}")
+                    gemini_answer = perguntar("gemini", user_message)
+                    print(f"Gemini -> {gemini_answer}")
+                    last_update = send_gemini_answer(sock_tcp, update, gemini_answer)
+        
+        print("-------------")
+        time.sleep(1)
+    sock_tcp.close()
+
+if __name__ == "__main__":
+    main()
